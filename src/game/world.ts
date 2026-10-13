@@ -659,29 +659,42 @@ function cityOffset(world: World, X: number, Y: number, Z: number, out: number[]
 
 /** Feature-preserving normals for Linefield faces: average with coincident vertices whose
  * normals are within 35deg, so chamfered/curved facades shade smoothly but real corners stay crisp. */
-function smoothCityNormals(g: THREE.BufferGeometry, verts: number[]) {
+let scratchN = new Float32Array(0);
+const nGroups = new Map<number, number[]>();
+function smoothCityNormals(g: THREE.BufferGeometry, verts: number[], ox: number, oz: number) {
   if (!verts.length) return;
   const P = g.getAttribute("position").array as Float32Array;
   const N = g.getAttribute("normal").array as Float32Array;
-  const groups = new Map<string, number[]>();
+  const groups = nGroups;
+  groups.clear();
+  // numeric key from chunk-local, 1/64-quantized position (x,z within ~[-4,20], y within [0,400])
   for (const v of verts) {
-    const k = `${Math.round(P[v * 3] * 64)},${Math.round(P[v * 3 + 1] * 64)},${Math.round(P[v * 3 + 2] * 64)}`;
+    const kx = Math.round((P[v * 3] - ox + 8) * 64), ky = Math.round(P[v * 3 + 1] * 64), kz = Math.round((P[v * 3 + 2] - oz + 8) * 64);
+    const k = (ky * 4096 + kx) * 4096 + kz;
     const a = groups.get(k); if (a) a.push(v); else groups.set(k, [v]);
   }
-  const C = Math.cos((35 * Math.PI) / 180), out = new Float32Array(N.length); out.set(N);
+  const C = Math.cos((35 * Math.PI) / 180);
+  if (scratchN.length < verts.length * 3) scratchN = new Float32Array(verts.length * 3 * 2);
+  const out = scratchN;
   for (const list of groups.values()) {
-    if (list.length < 2) continue;
-    for (const a of list) {
+    const n = list.length;
+    if (n < 2) continue;
+    for (let i = 0; i < n; i++) {
+      const a = list[i] * 3;
+      const ax = N[a], ay = N[a + 1], az = N[a + 2];
       let x = 0, y = 0, z = 0;
-      for (const b of list) {
-        const d = N[a * 3] * N[b * 3] + N[a * 3 + 1] * N[b * 3 + 1] + N[a * 3 + 2] * N[b * 3 + 2];
-        if (d >= C) { x += N[b * 3]; y += N[b * 3 + 1]; z += N[b * 3 + 2]; }
+      for (let j = 0; j < n; j++) {
+        const b = list[j] * 3;
+        const bx = N[b], by = N[b + 1], bz = N[b + 2];
+        if (ax * bx + ay * by + az * bz >= C) { x += bx; y += by; z += bz; }
       }
-      const l = Math.hypot(x, y, z) || 1;
-      out[a * 3] = x / l; out[a * 3 + 1] = y / l; out[a * 3 + 2] = z / l;
+      const l = Math.sqrt(x * x + y * y + z * z) || 1;
+      out[i * 3] = x / l; out[i * 3 + 1] = y / l; out[i * 3 + 2] = z / l;
     }
+    for (let i = 0; i < n; i++) { const a = list[i] * 3; N[a] = out[i * 3]; N[a + 1] = out[i * 3 + 1]; N[a + 2] = out[i * 3 + 2]; }
   }
-  N.set(out); g.getAttribute("normal").needsUpdate = true;
+  groups.clear();
+  g.getAttribute("normal").needsUpdate = true;
 }
 
 /** City PBR material class for the chunk shader: 0 none, 1 glass, 2 metal/panel, 3 asphalt, 4 neon, 5 road paint.
@@ -861,7 +874,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number) {
   g.addGroup(0, ind.length, 0);
   g.addGroup(ind.length, wind.length, 1);
   g.computeVertexNormals();
-  smoothCityNormals(g, cityV);
+  smoothCityNormals(g, cityV, ox, oz);
   g.computeBoundingSphere();
   return g;
 }
