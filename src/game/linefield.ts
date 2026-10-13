@@ -30,7 +30,23 @@ async function loadAll() {
   try {
     const res = await fetch(`/linefield/linefield_all.bin`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const buf = new Uint8Array(await res.arrayBuffer());
+    const total = +(res.headers.get("content-length") || 0);
+    let buf: Uint8Array;
+    if (res.body && total) {
+      const reader = res.body.getReader();
+      const parts: Uint8Array[] = [];
+      let got = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value); got += value.length;
+        setLoading({ progress: Math.min(0.99, got / total) });
+      }
+      buf = new Uint8Array(got);
+      let o = 0;
+      for (const p of parts) { buf.set(p, o); o += p.length; }
+    } else buf = new Uint8Array(await res.arrayBuffer());
+    setLoading({ progress: 1, stage: "Building spawn area" });
     // tolerate servers that already stripped the gzip layer
     const all = buf[0] === 0x1f && buf[1] === 0x8b
       ? new Uint8Array(await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer())
