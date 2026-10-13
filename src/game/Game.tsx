@@ -13,6 +13,7 @@ import { useUI } from "./state";
 import { Population } from "./Population";
 import { loading, meshed, setLoading, subscribeLoading } from "./loading";
 import { chunkKey } from "./world";
+import { CityAmenities } from "./CityAmenities";
 
 const RADIUS = isTouchDevice() ? 3 : 4;
 const SHADOW_RES = isTouchDevice() ? 1024 : 2048;
@@ -690,6 +691,7 @@ function Scene() {
   return (
     <>
       <Sky />
+      <CityAmenities />
       <Clouds />
       <Chunks material={material} />
       <Player zt={zt} />
