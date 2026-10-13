@@ -11,6 +11,8 @@ import { touch, isTouchDevice } from "./touch";
 import { TouchControls } from "./TouchControls";
 import { useUI } from "./state";
 import { Population } from "./Population";
+import { loading, meshed, setLoading, subscribeLoading } from "./loading";
+import { chunkKey } from "./world";
 
 const RADIUS = isTouchDevice() ? 3 : 4;
 const SHADOW_RES = isTouchDevice() ? 1024 : 2048;
@@ -24,7 +26,7 @@ const budget = { t: -1, n: 0 };
 function takeBudget(t: number) {
   if (budget.t !== t) {
     budget.t = t;
-    budget.n = 2;
+    budget.n = 1; // at most one chunk rebuild per frame
   }
   return budget.n-- > 0;
 }
@@ -35,14 +37,48 @@ function ChunkMesh({ cx, cz, world, material }: { cx: number; cz: number; world:
   useFrame((s) => {
     const v = world.version(cx, cz);
     if (v === ver.current || !ref.current) return;
-    if (ver.current === -1 && !takeBudget(s.clock.elapsedTime)) return;
+    if (!takeBudget(s.clock.elapsedTime)) return;
     ver.current = v;
+    meshed.set(chunkKey(cx, cz), v);
     const old = ref.current.geometry;
     ref.current.geometry = buildChunkGeometry(world, cx, cz);
     old.dispose();
   });
-  useEffect(() => () => ref.current?.geometry.dispose(), []);
+  useEffect(() => () => { meshed.delete(chunkKey(cx, cz)); ref.current?.geometry.dispose(); }, []);
   return <mesh ref={ref} material={material} castShadow receiveShadow />;
+}
+
+/** Flips loading.ready once the city bundle is in and the 3x3 chunks around spawn are meshed. */
+function LoadGate() {
+  const g = getGame();
+  const t0 = useRef(performance.now());
+  useFrame(() => {
+    if (loading.ready) return;
+    const timedOut = performance.now() - t0.current > 45000; // never trap the player forever
+    if (!loading.lfReady && !timedOut) return;
+    const cx = Math.floor(g.pos.x / CH), cz = Math.floor(g.pos.z / CH);
+    let done = 0;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++)
+      if (meshed.get(chunkKey(cx + dx, cz + dz)) === g.world.version(cx + dx, cz + dz)) done++;
+    if (done === 9 || timedOut) setLoading({ ready: true });
+    else if (loading.lfReady) setLoading({ progress: done / 9, stage: "Building spawn area" });
+  });
+  return null;
+}
+
+function LoadingOverlay() {
+  const [, force] = useState(0);
+  useEffect(() => subscribeLoading(() => force((n) => n + 1)), []);
+  if (loading.ready) return null;
+  return (
+    <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-background text-foreground">
+      <div className="text-lg font-semibold tracking-wide">{loading.stage}…</div>
+      <div className="h-2 w-64 overflow-hidden rounded-full bg-muted">
+        <div className="h-full bg-primary transition-all" style={{ width: `${Math.round(loading.progress * 100)}%` }} />
+      </div>
+      <div className="text-sm text-muted-foreground">{Math.round(loading.progress * 100)}%</div>
+    </div>
+  );
 }
 
 function Chunks({ material }: { material: THREE.Material }) {
@@ -450,6 +486,7 @@ function Player({ zt }: { zt: React.MutableRefObject<ZombieTarget> }) {
     const dt = Math.min(delta, 0.05);
     clock.current = s.clock.elapsedTime;
     const k = keys.current;
+    if (!loading.ready) return; // frozen until the spawn area is built
     const active = ui.locked && !ui.dead && !mapView.open;
 
     // touch look
@@ -825,6 +862,7 @@ export function Game() {
         }}
         camera={{ fov: 75, near: 0.05, far: 520, position: [g.pos.x, g.pos.y + 1.62, g.pos.z] }}>
         <Scene />
+        <LoadGate />
         <LandscapeFix portrait={portrait} w={w} h={h} />
         <PointerLockControls
           selector="#__no_auto_lock"
@@ -843,7 +881,8 @@ export function Game() {
         />
       </Canvas>
       <HUD />
-      {ui2.locked && !ui2.dead && touch.enabled && !mapView.open && <TouchControls />}
+      <LoadingOverlay />
+      {loading.ready && ui2.locked && !ui2.dead && touch.enabled && !mapView.open && <TouchControls />}
     </div>
   );
 }
