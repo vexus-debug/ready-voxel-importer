@@ -15,6 +15,8 @@ export const LF_Z0 = -1000;
 export const LF_CX = LF_X0 + LF_SIZE / 2, LF_CZ = LF_Z0 + LF_SIZE / 2;
 
 interface Tile { data: Uint8Array; off: Uint32Array }
+import { setLoading } from "./loading";
+
 const tiles = new Map<string, Tile>();
 if (typeof window !== "undefined") queueMicrotask(() => lfTile(0, 0)); // start the master download immediately
 const listeners: ((tx: number, tz: number) => void)[] = [];
@@ -30,7 +32,23 @@ async function loadAll() {
   try {
     const res = await fetch(`/linefield/linefield_all.bin`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const buf = new Uint8Array(await res.arrayBuffer());
+    const total = +(res.headers.get("content-length") || 0);
+    let buf: Uint8Array;
+    if (res.body && total) {
+      const reader = res.body.getReader();
+      const parts: Uint8Array[] = [];
+      let got = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value); got += value.length;
+        setLoading({ progress: Math.min(0.99, got / total) });
+      }
+      buf = new Uint8Array(got);
+      let o = 0;
+      for (const p of parts) { buf.set(p, o); o += p.length; }
+    } else buf = new Uint8Array(await res.arrayBuffer());
+    setLoading({ progress: 1, stage: "Building spawn area" });
     // tolerate servers that already stripped the gzip layer
     const all = buf[0] === 0x1f && buf[1] === 0x8b
       ? new Uint8Array(await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer())
@@ -47,9 +65,11 @@ async function loadAll() {
     }
     for (let i = 0; i < NT * NT; i++) for (const f of listeners) f(i % NT, (i / NT) | 0);
     for (const f of ready) f();
+    setLoading({ lfReady: true });
   } catch (e) {
     console.warn("Linefield bundle failed", e);
     started = false;
+    setLoading({ lfReady: true, progress: 1, stage: "Building spawn area" });
   }
 }
 
