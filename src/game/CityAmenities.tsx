@@ -54,7 +54,7 @@ function useParts() {
         { geo: new THREE.TorusGeometry(1, 0.06, 5, 20), mat: steel, place: (a, o) => { base(a, o); o.scale.set(a.s, a.s, a.s); } },
         { geo: tubeShell, mat: glass, place: (a, o) => { base(a, o); o.scale.set(a.s, a.s, 1); } },
       ],
-      conduits: [-0.25, 0, 0.25].map((x, k) => ({
+      conduits: [-0.25, 0, 0.25].map((x, k): Part => ({
         geo: cyl(0.07 + k * 0.02, 0.07 + k * 0.02, 1, 6), mat: k === 1 ? graphite : steel,
         place: (a: Anchor, o: THREE.Object3D) => { base(a, o); o.translateX(x); o.scale.set(1, a.s, 1); },
       })).concat([{ geo: box(0.9, 0.6, 0.4), mat: graphite, place: (a, o) => { base(a, o); o.translateY(a.s - 0.4); } }]),

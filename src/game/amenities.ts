@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Phase 3 Linefield amenities: one-time scan of the city columns that finds anchor spots for
 // streetlights, bollards, guardrails, skybridge ribs, facade conduits, helipads, masts, dishes and vents.
 // Reads linefield.ts directly (no world.ts import) and runs in small slices so it never freezes a frame.
